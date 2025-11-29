@@ -1,0 +1,99 @@
+- name: Update Frythub web apps (no Nginx changes)
+  hosts: web
+  become: true
+  gather_facts: true
+
+  vars_files:
+    - "{{ apps_vars_file }}"
+
+  vars:
+    repo_url: "git@github.com:frythub/frythub-web.git"
+    repo_root_test: "/var/www/frythub-web-test"
+    repo_root_prod: "/var/www/frythub-web-prod"
+    target_env: "test"  # override with -e "target_env=prod"
+    pm2_user: "ansible"
+    apps_vars_file: "/etc/ansible/cicd/apps.yml"
+    repo_branch_test: "dev"
+    repo_branch_prod: "main"
+
+  pre_tasks:
+    - name: Fail if target_env is invalid
+      ansible.builtin.fail:
+        msg: "target_env must be 'test' or 'prod'"
+      when: target_env not in ['test', 'prod']
+
+    - name: Set repo_root based on target_env
+      ansible.builtin.set_fact:
+        repo_root: "{{ repo_root_test if target_env == 'test' else repo_root_prod }}"
+
+    - name: Select apps by environment
+      ansible.builtin.set_fact:
+        selected_apps: "{{ apps | selectattr('env', 'equalto', target_env) | list }}"
+
+    - name: Compute unique app names for build step
+      ansible.builtin.set_fact:
+        unique_app_names: "{{ selected_apps | map(attribute='name') | unique | list }}"
+
+  tasks:
+    - name: Ensure base directory exists for this env
+      ansible.builtin.file:
+        path: "{{ repo_root }}"
+        state: directory
+        owner: "{{ pm2_user }}"
+        group: "{{ pm2_user }}"
+        mode: "0755"
+
+    - name: Update monorepo for this env
+      become_user: "{{ pm2_user }}"
+      ansible.builtin.git:
+        repo: "{{ repo_url }}"
+        dest: "{{ repo_root }}"
+        version: "{{ repo_branch_test if target_env == 'test' else repo_branch_prod }}"
+        accept_hostkey: yes
+        update: yes
+        force: yes
+
+    - name: Install pnpm globally (if needed)
+      ansible.builtin.command: npm install -g pnpm
+      args:
+        creates: /usr/local/bin/pnpm
+
+    - name: Install monorepo dependencies with pnpm
+      become_user: "{{ pm2_user }}"
+      ansible.builtin.command: pnpm install --prod=false
+      args:
+        chdir: "{{ repo_root }}"
+
+    - name: Build each app for this env
+      become_user: "{{ pm2_user }}"
+      ansible.builtin.command: "pnpm --filter {{ item }} build"
+      args:
+        chdir: "{{ repo_root }}"
+      loop: "{{ unique_app_names }}"
+      loop_control:
+        label: "{{ item }}"
+
+    - name: Restart app via PM2 (ignore missing)
+      become_user: "{{ pm2_user }}"
+      ansible.builtin.command: pm2 restart {{ item.name }}-{{ item.env }}
+      register: pm2_restart
+      failed_when: pm2_restart.rc not in [0, 1]
+      changed_when: pm2_restart.rc == 0
+      loop: "{{ selected_apps }}"
+      loop_control:
+        label: "{{ item.name }}-{{ item.env }}"
+        index_var: restart_idx
+
+    - name: Start app if PM2 restart failed (missing process)
+      become_user: "{{ pm2_user }}"
+      ansible.builtin.command: >
+        pm2 start /etc/pm2/{{ item.name }}-{{ item.env }}.ecosystem.config.js
+      when: (pm2_restart.results[start_idx].rc | default(1)) != 0
+      loop: "{{ selected_apps }}"
+      loop_control:
+        label: "{{ item.name }}-{{ item.env }}"
+        index_var: start_idx
+
+    - name: Save PM2 process list
+      become_user: "{{ pm2_user }}"
+      ansible.builtin.command: pm2 save

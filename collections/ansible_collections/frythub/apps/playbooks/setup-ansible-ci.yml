@@ -1,0 +1,71 @@
+- name: Stage CI/CD playbooks on servers
+  hosts: web
+  become: true
+  gather_facts: false
+
+  vars:
+    ci_dir: /etc/ansible/cicd
+
+  tasks:
+    - name: Ensure CI/CD playbook directory exists
+      ansible.builtin.file:
+        path: "{{ ci_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Copy web update playbook for CI
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/update-web-apps.yml"
+        dest: "{{ ci_dir }}/update-web-apps.yml"
+        owner: root
+        group: root
+        mode: "0644"
+
+    - name: Copy .NET API update playbook for CI
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/update-dotnet-api.yml"
+        dest: "{{ ci_dir }}/update-dotnet-api.yml"
+        owner: root
+        group: root
+        mode: "0644"
+
+    - name: Copy apps variables for CI (env/app definitions)
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../../../../../group_vars/web/apps.yml"
+        dest: "{{ ci_dir }}/apps.yml"
+        owner: root
+        group: root
+        mode: "0644"
+
+    - name: Write CI inventory (defaults to localhost web group)
+      ansible.builtin.copy:
+        dest: "{{ ci_dir }}/hosts"
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          [web]
+          localhost ansible_connection=local ansible_user=ansible
+          # or use the IP if you prefer SSH instead of local
+          #74.208.248.114 ansible_user=ansible
+
+    - name: Write CI ansible.cfg pointing to CI inventory
+      ansible.builtin.copy:
+        dest: "{{ ci_dir }}/ansible.cfg"
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          [defaults]
+          inventory = {{ ci_dir }}/hosts
+          host_key_checking = False
+          retry_files_enabled = False
+    - name: Copy apps variables for CI (env/app definitions)
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../../../../../group_vars/web/apps.yml"
+        dest: "{{ ci_dir }}/apps.yml"
+        owner: root
+        group: root
+        mode: "0644"

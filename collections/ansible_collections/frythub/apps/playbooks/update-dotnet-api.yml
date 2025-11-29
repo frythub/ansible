@@ -1,0 +1,70 @@
+- name: Update Frythub .NET API (no Nginx changes)
+  hosts: web
+  become: true
+  gather_facts: true
+
+  vars:
+    repo_url: "git@github.com:frythub/frythub-backend.git"
+    repo_root_test: "/var/www/frythub-api-test"
+    repo_root_prod: "/var/www/frythub-api-prod"
+    publish_subdir: "publish"
+    service_base_name: "frythub-api"
+    target_env: "test"  # override with -e "target_env=prod"
+    repo_branch_test: "dev"
+    repo_branch_prod: "main"
+
+  pre_tasks:
+    - name: Fail if target_env is invalid
+      ansible.builtin.fail:
+        msg: "target_env must be 'test' or 'prod'"
+      when: target_env not in ['test', 'prod']
+
+    - name: Set base env-specific variables
+      ansible.builtin.set_fact:
+        repo_root: "{{ repo_root_test if target_env == 'test' else repo_root_prod }}"
+        service_name: "{{ service_base_name }}-{{ target_env }}"
+        env_file_path: "{{ (repo_root_test if target_env == 'test' else repo_root_prod) }}/.env"
+
+    - name: Compute publish_dir from repo_root
+      ansible.builtin.set_fact:
+        publish_dir: "{{ repo_root }}/{{ publish_subdir }}"
+
+  tasks:
+    - name: Ensure repo_root exists
+      ansible.builtin.file:
+        path: "{{ repo_root }}"
+        state: directory
+        owner: ansible
+        group: ansible
+        mode: "0755"
+
+    - name: Update API repo for this env
+      become_user: ansible
+      ansible.builtin.git:
+        repo: "{{ repo_url }}"
+        dest: "{{ repo_root }}"
+        version: "{{ repo_branch_test if target_env == 'test' else repo_branch_prod }}"
+        accept_hostkey: yes
+        update: yes
+        force: yes
+
+    - name: Restore .NET dependencies
+      become_user: ansible
+      ansible.builtin.command: dotnet restore Frythub.csproj
+      args:
+        chdir: "{{ repo_root }}"
+
+    - name: Publish .NET API (Release)
+      become_user: ansible
+      ansible.builtin.command: >
+        dotnet publish Frythub.csproj -c Release -o "{{ publish_dir }}"
+      args:
+        chdir: "{{ repo_root }}"
+
+    - name: Reload systemd units (in case service file changed)
+      ansible.builtin.command: systemctl daemon-reload
+
+    - name: Restart .NET API service
+      ansible.builtin.systemd:
+        name: "{{ service_name }}"
+        state: restarted

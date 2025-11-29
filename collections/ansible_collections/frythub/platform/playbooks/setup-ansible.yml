@@ -1,0 +1,27 @@
+- name: Install Ansible on target hosts
+  hosts: all
+  become: true
+  gather_facts: true
+
+  tasks:
+    - name: Update apt cache
+      ansible.builtin.apt:
+        update_cache: yes
+        cache_valid_time: 3600
+
+    - name: Install prerequisites
+      ansible.builtin.apt:
+        name:
+          - software-properties-common
+        state: present
+
+    - name: Add official Ansible PPA
+      ansible.builtin.command: >
+        add-apt-repository --yes --update ppa:ansible/ansible
+      args:
+        creates: /etc/apt/sources.list.d/ansible-ubuntu-ansible.list
+
+    - name: Install Ansible
+      ansible.builtin.apt:
+        name: ansible
+        state: present

@@ -18,6 +18,8 @@ Run with:
 ansible-playbook -i ansible/inventory/hosts.ini ansible/collections/ansible_collections/frythub/platform/playbooks/<playbook>.yml
 ```
 
+- `setup-ansible.yml` — install Ansible on target hosts (Ubuntu/Debian).
+  - Example: `.../setup-ansible.yml`
 - `test-orchestration.yml` — quick ping + uptime check on all hosts.
   - Example: `.../test-orchestration.yml`
 - `setup-nginx.yml` — install/start Nginx, deploys a simple landing page.
@@ -64,6 +66,18 @@ ansible-playbook -i ansible/inventory/hosts.ini ansible/collections/ansible_coll
 - `deploy-dotnet-api.yml` — checkout/publish .NET API, install systemd unit, Nginx proxy.
   - Override environment: `-e "target_env=test"` or `-e "target_env=prod"` (default test).
   - Creates a blank `.env` if missing at the repo root for that environment.
+- `update-web-apps.yml` — update code, rebuild, and restart PM2 apps (no Nginx changes).
+  - Test (default, pulls branch `dev`): `ansible-playbook -i ansible/inventory/hosts.ini ansible/collections/ansible_collections/frythub/apps/playbooks/update-web-apps.yml`
+  - Prod (pulls branch `main`): add `-e "target_env=prod"`
+- `update-dotnet-api.yml` — update code, republish, restart systemd service (no Nginx changes).
+  - Test (default, pulls branch `dev`): `ansible-playbook -i ansible/inventory/hosts.ini ansible/collections/ansible_collections/frythub/apps/playbooks/update-dotnet-api.yml`
+  - Prod (pulls branch `main`): add `-e "target_env=prod"`
+- `setup-ansible-ci.yml` — stage update playbooks on servers for CI triggers.
+  - Copies `update-web-apps.yml`, `update-dotnet-api.yml`, `apps.yml`, writes a CI inventory at `/etc/ansible/cicd/hosts` (defaults to localhost in the `web` group; adjust to your hosts), and writes `/etc/ansible/cicd/ansible.cfg` pointing to that inventory.
+  - Run: `ansible-playbook -i ansible/inventory/hosts.ini ansible/collections/ansible_collections/frythub/apps/playbooks/setup-ansible-ci.yml`
+- `cicd-deploy.yml` — runs web and API deploys for both envs.
+  - Run all: `ansible-playbook -i ansible/inventory/hosts.ini ansible/collections/ansible_collections/frythub/apps/playbooks/cicd-deploy.yml`
+  - Run specific targets with tags: `--tags web_test`, `--tags web_prod`, `--tags api_test`, or `--tags api_prod`.
 - `letsencrypt-api.yml` — issue/renew Let's Encrypt cert for the API domain.
   - Prod (default): `.../letsencrypt-api.yml`
   - Test: `.../letsencrypt-api.yml -e "target_env=test"`
