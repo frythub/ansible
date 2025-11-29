@@ -1,0 +1,38 @@
+apps:
+  # ---------- TEST ENVS ----------
+  - name: admin
+    env: test
+    domain: admin.test.frythub.com
+    port: 3101
+
+  - name: customers-web
+    env: test
+    domain: customers.test.frythub.com
+    port: 3102
+
+  - name: shippers-web
+    env: test
+    domain: shippers.test.frythub.com
+    port: 3103
+
+  # ---------- PROD ENVS ----------
+  - name: admin
+    env: prod
+    domain: admin.frythub.com
+    port: 3201
+
+  - name: customers-web
+    env: prod
+    domain: customers.frythub.com
+    port: 3202
+
+  - name: shippers-web
+    env: prod
+    domain: shippers.frythub.com
+    port: 3203
+
+  # ---------- MARKETING (LANDING ONLY, PROD) ----------
+  - name: marketing
+    env: prod              # only prod; no test version
+    domain: frythub.com    # or marketing.frythub.com if you prefer
+    port: 3200

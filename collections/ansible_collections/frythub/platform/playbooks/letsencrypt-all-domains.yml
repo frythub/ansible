@@ -1,0 +1,57 @@
+---
+- name: Issue Let's Encrypt certificates for all Frythub domains
+  hosts: web
+  become: true
+  gather_facts: true
+
+  vars_files:
+    - "{{ inventory_dir }}/../group_vars/web/apps.yml"   # same file that defines "apps" with "domain"
+
+  vars:
+    letsencrypt_email: "frythubapp@gmail.com"
+
+  pre_tasks:
+    - name: Collect unique domains from apps
+      ansible.builtin.set_fact:
+        all_domains: "{{ apps | map(attribute='domain') | unique | list }}"
+
+  tasks:
+    - name: Ensure Nginx is installed
+      ansible.builtin.package:
+        name: nginx
+        state: present
+
+    - name: Install Certbot and Nginx plugin
+      ansible.builtin.package:
+        name:
+          - certbot
+          - python3-certbot-nginx
+        state: present
+
+    # Optional but nice: make sure Nginx is running before HTTP-01 challenges
+    - name: Ensure Nginx is started and enabled
+      ansible.builtin.service:
+        name: nginx
+        state: started
+        enabled: true
+
+    - name: Obtain/renew Let's Encrypt cert for each domain via Nginx
+      ansible.builtin.command: >
+        certbot --nginx
+        -d {{ item }}
+        --non-interactive
+        --agree-tos
+        --email {{ letsencrypt_email }}
+        --redirect
+      loop: "{{ all_domains }}"
+      loop_control:
+        label: "{{ item }}"
+      register: certbot_result
+      changed_when: "'Congratulations!' in certbot_result.stdout"
+      # If you want it to never fail the play when a single domain fails, uncomment:
+      # ignore_errors: yes
+
+    - name: Reload Nginx after cert changes
+      ansible.builtin.service:
+        name: nginx
+        state: reloaded

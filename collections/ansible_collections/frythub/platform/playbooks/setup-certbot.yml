@@ -1,0 +1,24 @@
+- name: Install Certbot for Nginx hosts
+  hosts: web
+  become: true
+  gather_facts: true
+
+  tasks:
+    - name: Ensure apt cache is up to date
+      ansible.builtin.apt:
+        update_cache: yes
+        cache_valid_time: 3600
+
+    - name: Install Certbot and Nginx plugin
+      ansible.builtin.apt:
+        name:
+          - certbot
+          - python3-certbot-nginx
+        state: present
+
+    - name: Print next steps
+      ansible.builtin.debug:
+        msg: >
+          Certbot installed. Issue a cert with:
+          sudo certbot --nginx -d yourdomain.com -d www.yourdomain.com
+          and verify renewal with: sudo certbot renew --dry-run

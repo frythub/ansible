@@ -1,0 +1,51 @@
+- name: Install .NET runtime for hosting ASP.NET Core apps
+  hosts: web
+  become: true
+  gather_facts: true
+
+  vars:
+    dotnet_release: "8.0"  # change to 6.0/7.0 if needed
+    # Microsoft hasn't published a "noble" repo yet; use the 22.04 package for 24.04.
+    dotnet_repo_version: "{{ {'24.04': '22.04'}.get(ansible_distribution_version, ansible_distribution_version | default('22.04')) }}"
+
+  tasks:
+    - name: Install prerequisite packages
+      ansible.builtin.apt:
+        update_cache: yes
+        name:
+          - ca-certificates
+          - apt-transport-https
+          - curl
+        state: present
+
+    - name: Download Microsoft package repo config (.deb)
+      ansible.builtin.get_url:
+        url: "https://packages.microsoft.com/config/ubuntu/{{ dotnet_repo_version }}/packages-microsoft-prod.deb"
+        dest: /tmp/packages-microsoft-prod.deb
+        mode: "0644"
+
+    - name: Install Microsoft package repo config
+      ansible.builtin.apt:
+        deb: /tmp/packages-microsoft-prod.deb
+        state: present
+
+    - name: Update apt cache
+      ansible.builtin.apt:
+        update_cache: yes
+        cache_valid_time: 3600
+
+    - name: Install ASP.NET Core runtime
+      ansible.builtin.apt:
+        name:
+          - "aspnetcore-runtime-{{ dotnet_release }}"
+          - "dotnet-runtime-{{ dotnet_release }}"
+        state: present
+
+    - name: Show installed dotnet info
+      ansible.builtin.command: dotnet --info
+      register: dotnet_info
+      changed_when: false
+
+    - name: Display dotnet info
+      ansible.builtin.debug:
+        var: dotnet_info.stdout_lines

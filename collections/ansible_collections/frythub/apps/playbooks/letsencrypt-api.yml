@@ -1,0 +1,73 @@
+- name: Issue Let's Encrypt SSL for API domains (test + prod)
+  hosts: web
+  become: true
+  gather_facts: true
+
+  vars:
+    # Domains per environment
+    api_domains:
+      test: "api.test.frythub.com"
+      prod: "api.frythub.com"
+
+    # test | prod (override with: -e "target_env=test")
+    target_env: "prod"
+
+    # Where certbot stores certs
+    le_root: "/etc/letsencrypt/live"
+
+    # Your email for Let's Encrypt
+    certbot_email: "support@frythub.com"
+
+  pre_tasks:
+    - name: Fail if target_env invalid
+      ansible.builtin.fail:
+        msg: "target_env must be test or prod"
+      when: target_env not in ['test', 'prod']
+
+    - name: Pick domain for env
+      ansible.builtin.set_fact:
+        api_domain: "{{ api_domains[target_env] }}"
+
+  tasks:
+    # -------------------------
+    # INSTALL CERTBOT
+    # -------------------------
+    - name: Install certbot & nginx plugin
+      apt:
+        name:
+          - certbot
+          - python3-certbot-nginx
+        state: present
+        update_cache: yes
+
+    # -------------------------
+    # REQUEST / RENEW CERT
+    # -------------------------
+    - name: Run certbot to issue/renew certificate
+      ansible.builtin.command: >
+        certbot --nginx
+        -d {{ api_domain }}
+        --non-interactive
+        --agree-tos
+        --email {{ certbot_email }}
+        --redirect
+      register: certbot_result
+      changed_when: "'Congratulations' in certbot_result.stdout or 'No renewals' not in certbot_result.stdout"
+
+    # -------------------------
+    # VERIFY
+    # -------------------------
+    - name: Check certificate folder exists
+      ansible.builtin.stat:
+        path: "{{ le_root }}/{{ api_domain }}/fullchain.pem"
+      register: le_cert
+
+    - name: Fail if certificate was not created
+      ansible.builtin.fail:
+        msg: "Let's Encrypt certificate was NOT generated for {{ api_domain }}"
+      when: not le_cert.stat.exists
+
+    - name: Reload Nginx after certificate install
+      ansible.builtin.service:
+        name: nginx
+        state: reloaded

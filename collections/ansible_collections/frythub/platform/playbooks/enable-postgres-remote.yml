@@ -1,0 +1,60 @@
+- name: Open PostgreSQL for remote connections
+  hosts: db
+  become: true
+  gather_facts: false
+
+  vars:
+    # Restrict these to your IP/CIDR in production.
+    allowed_cidr4: 0.0.0.0/0
+    allowed_cidr6: ::/0
+
+  handlers:
+    - name: Reload PostgreSQL
+      ansible.builtin.service:
+        name: postgresql
+        state: reloaded
+
+  tasks:
+    - name: Get postgresql.conf path
+      ansible.builtin.shell: |
+        sudo -u postgres psql -tAc "show config_file;"
+      register: pg_conf_cmd
+      changed_when: false
+      failed_when: pg_conf_cmd.rc != 0 or (pg_conf_cmd.stdout | trim) == ""
+
+    - name: Get pg_hba.conf path
+      ansible.builtin.shell: |
+        sudo -u postgres psql -tAc "show hba_file;"
+      register: pg_hba_cmd
+      changed_when: false
+      failed_when: pg_hba_cmd.rc != 0 or (pg_hba_cmd.stdout | trim) == ""
+
+    - name: Set config paths
+      ansible.builtin.set_fact:
+        pg_conf_path: "{{ pg_conf_cmd.stdout | trim }}"
+        pg_hba_path: "{{ pg_hba_cmd.stdout | trim }}"
+
+    - name: Set listen_addresses to all interfaces
+      ansible.builtin.lineinfile:
+        path: "{{ pg_conf_path }}"
+        regexp: '^#?listen_addresses\s*='
+        line: "listen_addresses = '*'"
+        backup: yes
+      notify: Reload PostgreSQL
+
+    - name: Allow remote IPv4 connections
+      ansible.builtin.blockinfile:
+        path: "{{ pg_hba_path }}"
+        marker: "# {mark} ANSIBLE MANAGED REMOTE ACCESS IPv4"
+        block: |
+          host    all             all             {{ allowed_cidr4 }}            md5
+      notify: Reload PostgreSQL
+
+    - name: Allow remote IPv6 connections
+      ansible.builtin.blockinfile:
+        path: "{{ pg_hba_path }}"
+        marker: "# {mark} ANSIBLE MANAGED REMOTE ACCESS IPv6"
+        block: |
+          host    all             all             {{ allowed_cidr6 }}            md5
+      when: allowed_cidr6 | length > 0
+      notify: Reload PostgreSQL

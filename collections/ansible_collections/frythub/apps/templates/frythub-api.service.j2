@@ -1,0 +1,16 @@
+[Unit]
+Description=Frythub API ({{ target_env }})
+After=network.target
+
+[Service]
+WorkingDirectory={{ publish_dir }}
+ExecStart=/usr/bin/dotnet {{ publish_dir }}/Frythub.dll
+EnvironmentFile=-{{ env_file_path }}
+Restart=always
+RestartSec=5
+SyslogIdentifier={{ service_name }}
+User={{ deploy_user }}
+Environment=ASPNETCORE_URLS=http://0.0.0.0:{{ api_port }}
+
+[Install]
+WantedBy=multi-user.target

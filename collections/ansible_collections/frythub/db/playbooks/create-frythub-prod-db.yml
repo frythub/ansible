@@ -1,0 +1,53 @@
+- name: Create frythub_prod database and user
+  hosts: db
+  become: true
+  gather_facts: false
+
+  # Adjust path if vault.yml lives somewhere else
+  vars_files:
+    - "{{ inventory_dir }}/../group_vars/all/vault.yml"
+
+  vars:
+    db_name: frythub_prod
+    db_owner: postgres
+    app_db_user: "{{ frythub_prod_db_user }}"
+    app_db_password: "{{ frythub_prod_db_password }}"
+
+  tasks:
+    - name: Ensure psycopg2 client libs are present
+      ansible.builtin.apt:
+        update_cache: yes
+        name: python3-psycopg2
+        state: present
+
+    # ---- DATABASE CREATION ----
+
+    - name: Check if database already exists
+      ansible.builtin.shell: |
+        sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname='{{ db_name }}'"
+      register: db_exists
+      changed_when: false
+
+    - name: Create database if missing
+      ansible.builtin.shell: |
+        sudo -u postgres createdb -E UTF8 -T template0 -O "{{ db_owner }}" "{{ db_name }}"
+      when: db_exists.stdout.strip() != "1"
+
+    # ---- USER / ROLE CREATION ----
+
+    - name: Check if app DB user already exists
+      ansible.builtin.shell: |
+        sudo -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='{{ app_db_user }}'"
+      register: db_user_exists
+      changed_when: false
+
+    - name: Create app DB user with password if missing
+      ansible.builtin.shell: |
+        sudo -u postgres psql -c "CREATE ROLE {{ app_db_user }} WITH LOGIN PASSWORD '{{ app_db_password }}';"
+      when: db_user_exists.stdout.strip() != "1"
+
+    # ---- GRANTS ----
+
+    - name: Grant privileges on database to app user
+      ansible.builtin.shell: |
+        sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE {{ db_name }} TO {{ app_db_user }};"

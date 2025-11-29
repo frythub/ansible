@@ -1,0 +1,77 @@
+- name: Install Node.js and PM2 on web hosts
+  hosts: web
+  become: true
+  gather_facts: true
+
+  vars:
+    nodejs_major: "20"
+
+  tasks:
+    - name: Install prerequisites
+      ansible.builtin.apt:
+        update_cache: yes
+        name:
+          - ca-certificates
+          - curl
+          - gnupg
+        state: present
+
+    - name: Remove legacy NodeSource repo if present
+      ansible.builtin.file:
+        path: /etc/apt/sources.list.d/nodesource.list
+        state: absent
+
+    - name: Remove old NodeSource keyrings if present
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /usr/share/keyrings/nodesource.gpg
+        - /etc/apt/keyrings/nodesource.gpg
+
+    - name: Ensure keyrings directory exists
+      ansible.builtin.file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: "0755"
+
+    - name: Download and dearmor NodeSource signing key
+      ansible.builtin.command:
+        cmd: >
+          bash -c "curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key
+          | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg"
+      args:
+        creates: /etc/apt/keyrings/nodesource.gpg
+
+    - name: Add NodeSource repository
+      ansible.builtin.apt_repository:
+        repo: "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_{{ nodejs_major }}.x nodistro main"
+        filename: nodesource
+        state: present
+        update_cache: yes
+
+    - name: Install Node.js (includes npm)
+      ansible.builtin.apt:
+        name: nodejs
+        state: present
+
+    - name: Install PM2 globally
+      ansible.builtin.command: npm install -g pm2
+      args:
+        creates: /usr/bin/pm2
+
+    - name: Show Node.js version
+      ansible.builtin.command: node -v
+      register: node_version
+      changed_when: false
+
+    - name: Show PM2 version
+      ansible.builtin.command: pm2 -v
+      register: pm2_version
+      changed_when: false
+
+    - name: Display installed versions
+      ansible.builtin.debug:
+        msg:
+          - "Node version: {{ node_version.stdout }}"
+          - "PM2 version: {{ pm2_version.stdout }}"

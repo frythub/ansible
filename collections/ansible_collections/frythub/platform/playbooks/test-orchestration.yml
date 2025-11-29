@@ -1,0 +1,17 @@
+- name: Test orchestration connectivity and basics
+  hosts: all
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Verify SSH connectivity (ping module)
+      ansible.builtin.ping:
+
+    - name: Show uptime for each host
+      ansible.builtin.command: uptime
+      register: uptime_result
+      changed_when: false
+
+    - name: Display uptime output
+      ansible.builtin.debug:
+        msg: "{{ inventory_hostname }} uptime: {{ uptime_result.stdout }}"

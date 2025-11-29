@@ -1,0 +1,50 @@
+- name: Install and start Nginx on web hosts
+  hosts: web
+  become: true
+  gather_facts: true
+
+  vars:
+    nginx_welcome_text: "Frythub Nginx is up"
+
+  tasks:
+    - name: Ensure apt cache is up to date
+      ansible.builtin.apt:
+        update_cache: yes
+        cache_valid_time: 3600
+
+    - name: Install Nginx
+      ansible.builtin.apt:
+        name: nginx
+        state: present
+
+    - name: Enable and start Nginx
+      ansible.builtin.service:
+        name: nginx
+        state: started
+        enabled: yes
+
+    - name: Deploy a simple landing page
+      ansible.builtin.copy:
+        dest: /var/www/html/index.html
+        owner: www-data
+        group: www-data
+        mode: "0644"
+        content: |
+          <!doctype html>
+          <html lang="en">
+          <head>
+            <meta charset="utf-8">
+            <title>Nginx status</title>
+            <style>
+              body { font-family: Arial, sans-serif; margin: 3rem; color: #0f172a; }
+              .card { max-width: 32rem; padding: 2rem; border: 1px solid #e2e8f0; border-radius: 0.75rem; }
+            </style>
+          </head>
+          <body>
+            <div class="card">
+              <h1>Nginx OK</h1>
+              <p>{{ nginx_welcome_text }}</p>
+              <p>Host: {{ inventory_hostname }}</p>
+            </div>
+          </body>
+          </html>

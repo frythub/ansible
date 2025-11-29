@@ -1,0 +1,17 @@
+module.exports = {
+  apps: [
+    {
+      name: "{{ item.name }}-{{ item.env }}",
+      cwd: "{{ repo_root }}/apps/{{ item.name }}",
+      script: "pnpm",
+      args: "start",
+      env_file: "{{ repo_root }}/apps/{{ item.name }}/.env",
+      env: {
+        // You generally want production for test & prod because you're running the built app
+        NODE_ENV: "production",
+        APP_ENV: "{{ item.env }}",
+        PORT: "{{ item.port }}"
+      }
+    }
+  ]
+};

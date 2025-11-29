@@ -1,0 +1,182 @@
+- name: Deploy Frythub .NET API (test + prod)
+  hosts: web
+  become: true
+  gather_facts: true
+
+  vars:
+    # Git repo for the API
+    repo_url: "git@github.com:frythub/frythub-backend.git"
+
+    # Separate roots per environment
+    repo_root_test: "/var/www/frythub-api-test"
+    repo_root_prod: "/var/www/frythub-api-prod"
+
+    # User that owns the files and runs the service
+    deploy_user: "ansible"
+
+    # Subdir under repo_root where we publish
+    publish_subdir: "publish"
+
+    # Base name for the systemd service
+    service_base_name: "frythub-api"
+
+    # Ports per env
+    api_ports:
+      test: 5101
+      prod: 5100
+
+    # Domains per env
+    api_domains:
+      test: "api.test.frythub.com"
+      prod: "api.frythub.com"
+
+    # Override via: -e "target_env=test" or "target_env=prod"
+    target_env: "test"
+
+  # ---------------- PRE TASKS ----------------
+  pre_tasks:
+
+    - name: Fail if target_env is invalid
+      ansible.builtin.fail:
+        msg: "target_env must be 'test' or 'prod'"
+      when: target_env not in ['test', 'prod']
+
+    - name: Set base env-specific variables
+      ansible.builtin.set_fact:
+        repo_root: "{{ repo_root_test if target_env == 'test' else repo_root_prod }}"
+        service_name: "{{ service_base_name }}-{{ target_env }}"
+        api_port: "{{ api_ports[target_env] }}"
+        api_domain: "{{ api_domains[target_env] }}"
+
+    - name: Compute paths from repo_root
+      ansible.builtin.set_fact:
+        env_file_path: "{{ repo_root }}/.env"
+        publish_dir: "{{ repo_root }}/{{ publish_subdir }}"
+
+  # ---------------- MAIN TASKS ----------------
+  tasks:
+
+    # ---------- INSTALL .NET SDK (if not installed) ----------
+    - name: Install required packages for Microsoft package feed
+      ansible.builtin.apt:
+        name:
+          - wget
+          - apt-transport-https
+          - software-properties-common
+        update_cache: yes
+
+    - name: Download Microsoft package feed
+      ansible.builtin.command: >
+        wget https://packages.microsoft.com/config/ubuntu/{{ ansible_distribution_version }}/packages-microsoft-prod.deb
+        -O /tmp/packages-microsoft-prod.deb
+      args:
+        creates: /tmp/packages-microsoft-prod.deb
+
+    - name: Install Microsoft package feed
+      ansible.builtin.apt:
+        deb: /tmp/packages-microsoft-prod.deb
+
+    - name: Update apt cache
+      ansible.builtin.apt:
+        update_cache: yes
+
+    - name: Install .NET SDK 8
+      ansible.builtin.apt:
+        name: dotnet-sdk-8.0
+        state: present
+
+    # ---------- REPO FOR THIS ENV ----------
+    - name: Ensure repo_root exists
+      ansible.builtin.file:
+        path: "{{ repo_root }}"
+        state: directory
+        owner: "{{ deploy_user }}"
+        group: "{{ deploy_user }}"
+        mode: "0755"
+
+    - name: Checkout .NET API repo for this env
+      become_user: "{{ deploy_user }}"
+      ansible.builtin.git:
+        repo: "{{ repo_url }}"
+        dest: "{{ repo_root }}"
+        version: main
+        accept_hostkey: yes
+        update: yes            # pull latest if repo exists
+        force: yes             # overwrite if non-empty/non-repo
+
+    - name: Ensure .env exists for this env (blank by default)
+      ansible.builtin.file:
+        path: "{{ env_file_path }}"
+        state: touch
+        owner: "{{ deploy_user }}"
+        group: "{{ deploy_user }}"
+        mode: "0640"
+
+    # ---------- BUILD / PUBLISH ----------
+    - name: Restore .NET dependencies
+      become_user: "{{ deploy_user }}"
+      ansible.builtin.command: dotnet restore Frythub.csproj
+      args:
+        chdir: "{{ repo_root }}"
+
+    - name: Publish .NET API (Release)
+      become_user: "{{ deploy_user }}"
+      ansible.builtin.command: >
+        dotnet publish Frythub.csproj -c Release -o "{{ publish_dir }}"
+      args:
+        chdir: "{{ repo_root }}"
+
+    # ---------- SYSTEMD SERVICE ----------
+    - name: Ensure env directory for systemd exists
+      ansible.builtin.file:
+        path: "/etc/frythub"
+        state: directory
+        mode: "0755"
+
+    - name: Install systemd service unit for this env
+      ansible.builtin.template:
+        src: "../templates/frythub-api.service.j2"
+        dest: "/etc/systemd/system/{{ service_name }}.service"
+        mode: "0644"
+
+    - name: Unmask service if previously masked
+      ansible.builtin.command: systemctl unmask {{ service_name }}.service
+      ignore_errors: true
+
+    - name: Reload systemd daemon
+      ansible.builtin.command: systemctl daemon-reload
+
+    - name: Enable service on boot
+      ansible.builtin.systemd:
+        name: "{{ service_name }}"
+        enabled: true
+
+    - name: Restart .NET API service
+      ansible.builtin.systemd:
+        name: "{{ service_name }}"
+        state: restarted
+
+    # ---------- NGINX REVERSE PROXY ----------
+    - name: Create Nginx config for this API env
+      ansible.builtin.template:
+        src: "../templates/nginx-api.conf.j2"
+        dest: "/etc/nginx/sites-available/{{ service_name }}.conf"
+        mode: "0644"
+
+    - name: Enable Nginx site
+      ansible.builtin.file:
+        src: "/etc/nginx/sites-available/{{ service_name }}.conf"
+        dest: "/etc/nginx/sites-enabled/{{ service_name }}.conf"
+        state: link
+        force: true
+
+    - name: Test Nginx configuration
+      ansible.builtin.command: nginx -t
+      register: nginx_test
+      changed_when: false
+
+    - name: Reload Nginx
+      ansible.builtin.service:
+        name: nginx
+        state: reloaded
+      when: nginx_test.rc == 0
