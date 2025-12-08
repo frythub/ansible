@@ -1,5 +1,5 @@
 - name: Test orchestration connectivity and basics
-  hosts: all
+  hosts: web
   become: true
   gather_facts: false
 

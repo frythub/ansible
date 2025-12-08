@@ -1,0 +1,68 @@
+- name: Bootstrap ansible deployment user with SSH and sudo
+  hosts: frythub
+  become: true
+  gather_facts: false
+
+  vars:
+    deploy_user: "ansible"
+    deploy_group: "{{ deploy_user }}"
+    local_pubkey_path: "~/.ssh/id_rsa.pub"
+    allow_passwordless_sudo: true
+
+  pre_tasks:
+    - name: Ensure the local public key exists
+      delegate_to: localhost
+      become: false
+      ansible.builtin.stat:
+        path: "{{ local_pubkey_path | expanduser }}"
+      run_once: true
+      register: pubkey_file
+
+    - name: Fail if local public key is missing
+      delegate_to: localhost
+      become: false
+      ansible.builtin.fail:
+        msg: "Public key not found at {{ local_pubkey_path }}"
+      when: not pubkey_file.stat.exists
+      run_once: true
+
+  tasks:
+    - name: Ensure deploy group exists
+      ansible.builtin.group:
+        name: "{{ deploy_group }}"
+        state: present
+
+    - name: Ensure deploy user exists
+      ansible.builtin.user:
+        name: "{{ deploy_user }}"
+        shell: /bin/bash
+        create_home: true
+        group: "{{ deploy_group }}"
+        groups: "sudo"
+        append: true
+        state: present
+
+    - name: Ensure .ssh directory exists for deploy user
+      ansible.builtin.file:
+        path: "/home/{{ deploy_user }}/.ssh"
+        state: directory
+        owner: "{{ deploy_user }}"
+        group: "{{ deploy_group }}"
+        mode: "0700"
+
+    - name: Add local public key to deploy user
+      ansible.builtin.authorized_key:
+        user: "{{ deploy_user }}"
+        state: present
+        key: "{{ lookup('file', local_pubkey_path | expanduser) }}"
+        manage_dir: false
+
+    - name: Allow passwordless sudo for deploy user
+      ansible.builtin.copy:
+        dest: "/etc/sudoers.d/{{ deploy_user }}"
+        content: "{{ deploy_user }} ALL=(ALL) NOPASSWD:ALL\n"
+        mode: "0440"
+        owner: root
+        group: root
+        validate: "visudo -cf %s"
+      when: allow_passwordless_sudo

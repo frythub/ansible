@@ -17,6 +17,9 @@
     target_env: "test"
 
     pm2_user: "ansible"
+    swap_file: "/swapfile"
+    swap_size_mb: 2048
+    min_swap_mb: 512
 
   pre_tasks:
     - name: Fail if target_env is invalid
@@ -36,6 +39,43 @@
       ansible.builtin.set_fact:
         unique_app_names: "{{ selected_apps | map(attribute='name') | unique | list }}"
 
+    - name: Ensure swap is present on low-memory hosts
+      when: (ansible_swaptotal_mb | default(0)) < min_swap_mb
+      block:
+        - name: Create swap file if missing
+          ansible.builtin.command: "fallocate -l {{ swap_size_mb }}M {{ swap_file }}"
+          args:
+            creates: "{{ swap_file }}"
+          register: swapfile_create
+
+        - name: Set swap file permissions
+          ansible.builtin.file:
+            path: "{{ swap_file }}"
+            owner: root
+            group: root
+            mode: "0600"
+
+        - name: Format swap file
+          ansible.builtin.command: "mkswap {{ swap_file }}"
+          when: swapfile_create is changed
+
+        - name: Check active swap devices
+          ansible.builtin.command: swapon --noheadings --show=NAME
+          register: swap_on
+          changed_when: false
+
+        - name: Enable swap file
+          ansible.builtin.command: "swapon {{ swap_file }}"
+          when: swap_file not in (swap_on.stdout_lines | default([]))
+
+        - name: Persist swap in fstab
+          ansible.builtin.lineinfile:
+            path: /etc/fstab
+            regexp: "^{{ swap_file | regex_escape }}\\s+"
+            line: "{{ swap_file }} none swap sw 0 0"
+            state: present
+            create: true
+
   tasks:
     # ---------- REPO PER ENV ----------
 
@@ -53,8 +93,11 @@
         repo: "{{ repo_url }}"
         dest: "{{ repo_root }}"
         version: main
+        depth: 1
+        single_branch: yes
+        update: yes
         accept_hostkey: yes
-        force: yes
+        force: no
 
     - name: Install pnpm globally (if needed)
       ansible.builtin.command: npm install -g pnpm
@@ -95,13 +138,21 @@
       loop_control:
         label: "{{ item.name }}-{{ item.env }}"
 
-    - name: Configure PM2 to start on boot for {{ pm2_user }}
-      become_user: "{{ pm2_user }}"
+    - name: Configure PM2 startup for {{ pm2_user }} (systemd unit)
+      become: true
+      become_user: root
       ansible.builtin.command: >
         pm2 startup systemd -u {{ pm2_user }} --hp /home/{{ pm2_user }}
       register: pm2_startup
       failed_when: pm2_startup.rc not in [0, 1]
-      changed_when: "'Startup script' in pm2_startup.stdout or pm2_startup.rc == 0"
+      changed_when: "'systemd' in pm2_startup.stdout or pm2_startup.rc == 0"
+
+    - name: Ensure PM2 service is enabled and started
+      ansible.builtin.systemd:
+        name: "pm2-{{ pm2_user }}"
+        enabled: true
+        state: started
+        daemon_reload: true
 
     # --- IMPORTANT: nuke old processes so new cwd/repo_root is used ---
 

@@ -6,7 +6,7 @@
   vars:
     # Domains per environment
     api_domains:
-      test: "api.test.frythub.com"
+      test: "api-test.frythub.com"
       prod: "api.frythub.com"
 
     # test | prod (override with: -e "target_env=test")

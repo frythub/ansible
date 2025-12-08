@@ -2,17 +2,17 @@ apps:
   # ---------- TEST ENVS ----------
   - name: admin
     env: test
-    domain: admin.test.frythub.com
+    domain: admin-test.frythub.com
     port: 3101
 
   - name: customers-web
     env: test
-    domain: customers.test.frythub.com
+    domain: customers-test.frythub.com
     port: 3102
 
   - name: shippers-web
     env: test
-    domain: shippers.test.frythub.com
+    domain: shippers-test.frythub.com
     port: 3103
 
   # ---------- PROD ENVS ----------

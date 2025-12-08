@@ -27,7 +27,7 @@
 
     # Domains per env
     api_domains:
-      test: "api.test.frythub.com"
+      test: "api-test.frythub.com"
       prod: "api.frythub.com"
 
     # Override via: -e "target_env=test" or "target_env=prod"

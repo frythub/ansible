@@ -50,8 +50,10 @@
         dest: "{{ repo_root }}"
         version: "{{ repo_branch_test if target_env == 'test' else repo_branch_prod }}"
         accept_hostkey: yes
+        depth: 1
+        single_branch: yes
         update: yes
-        force: yes
+        force: no
 
     - name: Install pnpm globally (if needed)
       ansible.builtin.command: npm install -g pnpm
@@ -72,6 +74,22 @@
       loop: "{{ unique_app_names }}"
       loop_control:
         label: "{{ item }}"
+
+    - name: Configure PM2 startup for {{ pm2_user }} (systemd unit)
+      become: true
+      become_user: root
+      ansible.builtin.command: >
+        pm2 startup systemd -u {{ pm2_user }} --hp /home/{{ pm2_user }}
+      register: pm2_startup
+      failed_when: pm2_startup.rc not in [0, 1]
+      changed_when: "'systemd' in pm2_startup.stdout or pm2_startup.rc == 0"
+
+    - name: Ensure PM2 service is enabled and started
+      ansible.builtin.systemd:
+        name: "pm2-{{ pm2_user }}"
+        enabled: true
+        state: started
+        daemon_reload: true
 
     - name: Restart app via PM2 (ignore missing)
       become_user: "{{ pm2_user }}"
