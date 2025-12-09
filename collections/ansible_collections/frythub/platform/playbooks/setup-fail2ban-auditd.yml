@@ -1,0 +1,48 @@
+- name: Install Fail2ban and Auditd
+  hosts: all
+  become: true
+  gather_facts: true
+
+  vars:
+    fail2ban_bantime: "10m"
+    fail2ban_findtime: "10m"
+    fail2ban_maxretry: 5
+
+  tasks:
+    - name: Install fail2ban and auditd
+      ansible.builtin.apt:
+        name:
+          - fail2ban
+          - auditd
+        state: present
+        update_cache: yes
+
+    - name: Configure Fail2ban for SSH
+      ansible.builtin.copy:
+        dest: /etc/fail2ban/jail.d/ssh.local
+        mode: "0644"
+        content: |
+          [sshd]
+          enabled = true
+          bantime = {{ fail2ban_bantime }}
+          findtime = {{ fail2ban_findtime }}
+          maxretry = {{ fail2ban_maxretry }}
+      notify: Restart fail2ban
+
+    - name: Ensure fail2ban is enabled and running
+      ansible.builtin.systemd:
+        name: fail2ban
+        enabled: true
+        state: started
+
+    - name: Ensure auditd is enabled and running
+      ansible.builtin.systemd:
+        name: auditd
+        enabled: true
+        state: started
+
+  handlers:
+    - name: Restart fail2ban
+      ansible.builtin.systemd:
+        name: fail2ban
+        state: restarted

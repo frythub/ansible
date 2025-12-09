@@ -11,7 +11,7 @@
     repo_root_test: "/var/www/frythub-web-test"
     repo_root_prod: "/var/www/frythub-web-prod"
     target_env: "test"  # override with -e "target_env=prod"
-    pm2_user: "ansible"
+    app_user: "ansible"
     apps_vars_file: "/etc/ansible/cicd/apps.yml"
     repo_branch_test: "dev"
     repo_branch_prod: "main"
@@ -34,17 +34,44 @@
       ansible.builtin.set_fact:
         unique_app_names: "{{ selected_apps | map(attribute='name') | unique | list }}"
 
+    - name: Collect systemd web app template candidates
+      ansible.builtin.set_fact:
+        systemd_template_candidates:
+          - "{{ playbook_dir }}/templates/systemd-web-app.service.j2"
+          - "{{ playbook_dir }}/../templates/systemd-web-app.service.j2"
+
+    - name: Check systemd template candidates on controller
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      loop: "{{ systemd_template_candidates }}"
+      register: systemd_template_stats
+      delegate_to: localhost
+      become: false
+      run_once: true
+      loop_control:
+        label: "{{ item }}"
+
+    - name: Pick first existing systemd template
+      ansible.builtin.set_fact:
+        systemd_web_app_template: "{{ systemd_template_stats.results | selectattr('stat.exists','equalto', true) | map(attribute='stat.path') | first | default('') }}"
+      run_once: true
+
+    - name: Fail if systemd web app template is missing
+      ansible.builtin.fail:
+        msg: "systemd web app template not found on controller; expected at {{ systemd_template_candidates }}"
+      when: systemd_web_app_template == ""
+
   tasks:
     - name: Ensure base directory exists for this env
       ansible.builtin.file:
         path: "{{ repo_root }}"
         state: directory
-        owner: "{{ pm2_user }}"
-        group: "{{ pm2_user }}"
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
         mode: "0755"
 
     - name: Update monorepo for this env
-      become_user: "{{ pm2_user }}"
+      become_user: "{{ app_user }}"
       ansible.builtin.git:
         repo: "{{ repo_url }}"
         dest: "{{ repo_root }}"
@@ -61,13 +88,13 @@
         creates: /usr/local/bin/pnpm
 
     - name: Install monorepo dependencies with pnpm
-      become_user: "{{ pm2_user }}"
+      become_user: "{{ app_user }}"
       ansible.builtin.command: pnpm install --prod=false
       args:
         chdir: "{{ repo_root }}"
 
     - name: Build each app for this env
-      become_user: "{{ pm2_user }}"
+      become_user: "{{ app_user }}"
       ansible.builtin.command: "pnpm --filter {{ item }} build"
       args:
         chdir: "{{ repo_root }}"
@@ -75,43 +102,39 @@
       loop_control:
         label: "{{ item }}"
 
-    - name: Configure PM2 startup for {{ pm2_user }} (systemd unit)
-      become: true
-      become_user: root
-      ansible.builtin.command: >
-        pm2 startup systemd -u {{ pm2_user }} --hp /home/{{ pm2_user }}
-      register: pm2_startup
-      failed_when: pm2_startup.rc not in [0, 1]
-      changed_when: "'systemd' in pm2_startup.stdout or pm2_startup.rc == 0"
+    - name: Check for existing systemd service units
+      ansible.builtin.stat:
+        path: "/etc/systemd/system/{{ item.name }}-{{ item.env }}.service"
+      loop: "{{ selected_apps }}"
+      loop_control:
+        label: "{{ item.name }}-{{ item.env }}"
+      register: service_units
 
-    - name: Ensure PM2 service is enabled and started
+    - name: Render missing systemd service units
+      ansible.builtin.template:
+        src: "{{ systemd_web_app_template }}"
+        dest: "/etc/systemd/system/{{ item.item.name }}-{{ item.item.env }}.service"
+        mode: "0644"
+      loop: "{{ service_units.results }}"
+      when: not item.stat.exists
+      loop_control:
+        label: "{{ item.item.name }}-{{ item.item.env }}"
+
+    - name: Ensure web app services are enabled and running
       ansible.builtin.systemd:
-        name: "pm2-{{ pm2_user }}"
+        name: "{{ item.name }}-{{ item.env }}"
         enabled: true
-        state: started
+        state: restarted
         daemon_reload: true
-
-    - name: Restart app via PM2 (ignore missing)
-      become_user: "{{ pm2_user }}"
-      ansible.builtin.command: pm2 restart {{ item.name }}-{{ item.env }}
-      register: pm2_restart
-      failed_when: pm2_restart.rc not in [0, 1]
-      changed_when: pm2_restart.rc == 0
       loop: "{{ selected_apps }}"
       loop_control:
         label: "{{ item.name }}-{{ item.env }}"
-        index_var: restart_idx
 
-    - name: Start app if PM2 restart failed (missing process)
-      become_user: "{{ pm2_user }}"
-      ansible.builtin.command: >
-        pm2 start /etc/pm2/{{ item.name }}-{{ item.env }}.ecosystem.config.js
-      when: (pm2_restart.results[start_idx].rc | default(1)) != 0
+    - name: Verify web app services are active
+      ansible.builtin.command: systemctl is-active "{{ item.name }}-{{ item.env }}"
+      register: service_status
+      failed_when: service_status.rc != 0
+      changed_when: false
       loop: "{{ selected_apps }}"
       loop_control:
         label: "{{ item.name }}-{{ item.env }}"
-        index_var: start_idx
-
-    - name: Save PM2 process list
-      become_user: "{{ pm2_user }}"
-      ansible.builtin.command: pm2 save

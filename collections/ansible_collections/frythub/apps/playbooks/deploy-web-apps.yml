@@ -16,7 +16,7 @@
     # override with: -e "target_env=test" or -e "target_env=prod"
     target_env: "test"
 
-    pm2_user: "ansible"
+    app_user: "ansible"
     swap_file: "/swapfile"
     swap_size_mb: 2048
     min_swap_mb: 512
@@ -38,6 +38,33 @@
     - name: Compute unique app names for build step
       ansible.builtin.set_fact:
         unique_app_names: "{{ selected_apps | map(attribute='name') | unique | list }}"
+
+    - name: Collect systemd web app template candidates
+      ansible.builtin.set_fact:
+        systemd_template_candidates:
+          - "{{ playbook_dir }}/templates/systemd-web-app.service.j2"
+          - "{{ playbook_dir }}/../templates/systemd-web-app.service.j2"
+
+    - name: Check systemd template candidates on controller
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      loop: "{{ systemd_template_candidates }}"
+      register: systemd_template_stats
+      delegate_to: localhost
+      become: false
+      run_once: true
+      loop_control:
+        label: "{{ item }}"
+
+    - name: Pick first existing systemd template
+      ansible.builtin.set_fact:
+        systemd_web_app_template: "{{ systemd_template_stats.results | selectattr('stat.exists','equalto', true) | map(attribute='stat.path') | first | default('') }}"
+      run_once: true
+
+    - name: Fail if systemd web app template is missing
+      ansible.builtin.fail:
+        msg: "systemd web app template not found on controller; expected at {{ systemd_template_candidates }}"
+      when: systemd_web_app_template == ""
 
     - name: Ensure swap is present on low-memory hosts
       when: (ansible_swaptotal_mb | default(0)) < min_swap_mb
@@ -83,12 +110,12 @@
       ansible.builtin.file:
         path: "{{ repo_root }}"
         state: directory
-        owner: "{{ pm2_user }}"
-        group: "{{ pm2_user }}"
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
         mode: "0755"
 
     - name: Checkout monorepo for this env
-      become_user: "{{ pm2_user }}"
+      become_user: "{{ app_user }}"
       ansible.builtin.git:
         repo: "{{ repo_url }}"
         dest: "{{ repo_root }}"
@@ -105,7 +132,7 @@
         creates: /usr/local/bin/pnpm
 
     - name: Install monorepo dependencies with pnpm
-      become_user: "{{ pm2_user }}"
+      become_user: "{{ app_user }}"
       ansible.builtin.command: pnpm install --prod=false
       args:
         chdir: "{{ repo_root }}"
@@ -113,7 +140,7 @@
     # ---------- BUILD ONCE PER APP NAME (PER ENV REPO) ----------
 
     - name: Build each app for this env
-      become_user: "{{ pm2_user }}"
+      become_user: "{{ app_user }}"
       ansible.builtin.command: "pnpm --filter {{ item }} build"
       args:
         chdir: "{{ repo_root }}"
@@ -121,62 +148,26 @@
       loop_control:
         label: "{{ item }}"
 
-    # ---------- PM2 CONFIG & RUNTIME PER APP+ENV ----------
+    # ---------- SYSTEMD RUNTIME PER APP+ENV ----------
 
-    - name: Ensure PM2 config directory exists
-      ansible.builtin.file:
-        path: "/etc/pm2"
-        state: directory
-        mode: "0755"
-
-    - name: Create PM2 ecosystem config for each app/env
+    - name: Create systemd service for each app/env
       ansible.builtin.template:
-        src: "../templates/pm2-ecosystem-app.js.j2"
-        dest: "/etc/pm2/{{ item.name }}-{{ item.env }}.ecosystem.config.js"
+        src: "{{ systemd_web_app_template }}"
+        dest: "/etc/systemd/system/{{ item.name }}-{{ item.env }}.service"
         mode: "0644"
       loop: "{{ selected_apps }}"
       loop_control:
         label: "{{ item.name }}-{{ item.env }}"
 
-    - name: Configure PM2 startup for {{ pm2_user }} (systemd unit)
-      become: true
-      become_user: root
-      ansible.builtin.command: >
-        pm2 startup systemd -u {{ pm2_user }} --hp /home/{{ pm2_user }}
-      register: pm2_startup
-      failed_when: pm2_startup.rc not in [0, 1]
-      changed_when: "'systemd' in pm2_startup.stdout or pm2_startup.rc == 0"
-
-    - name: Ensure PM2 service is enabled and started
+    - name: Ensure web app services are enabled and running
       ansible.builtin.systemd:
-        name: "pm2-{{ pm2_user }}"
+        name: "{{ item.name }}-{{ item.env }}"
         enabled: true
-        state: started
+        state: restarted
         daemon_reload: true
-
-    # --- IMPORTANT: nuke old processes so new cwd/repo_root is used ---
-
-    - name: Delete existing PM2 process for this app/env (if any)
-      become_user: "{{ pm2_user }}"
-      ansible.builtin.command: pm2 delete {{ item.name }}-{{ item.env }}
-      register: pm2_delete_result
-      failed_when: pm2_delete_result.rc not in [0, 1]
-      changed_when: pm2_delete_result.rc == 0
       loop: "{{ selected_apps }}"
       loop_control:
         label: "{{ item.name }}-{{ item.env }}"
-
-    - name: Start app processes with PM2 from ecosystem config
-      become_user: "{{ pm2_user }}"
-      ansible.builtin.command: >
-        pm2 start /etc/pm2/{{ item.name }}-{{ item.env }}.ecosystem.config.js
-      loop: "{{ selected_apps }}"
-      loop_control:
-        label: "{{ item.name }}-{{ item.env }}"
-
-    - name: Save PM2 process list
-      become_user: "{{ pm2_user }}"
-      ansible.builtin.command: pm2 save
 
     # ---------- NGINX PER APP+ENV ----------
 

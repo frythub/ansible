@@ -4,7 +4,7 @@ This folder contains all automation to provision runtimes, databases, TLS, and d
 
 - `frythub.platform` — base runtimes, Nginx, certbot, Postgres install/opening, connectivity checks, bulk Let's Encrypt.
 - `frythub.db` — database creation playbooks.
-- `frythub.apps` — app deployments (web/PM2, .NET API) and API TLS.
+- `frythub.apps` — app deployments (web/systemd, .NET API) and API TLS.
 
 ## Prerequisites
 - Ansible installed on the control node.
@@ -27,8 +27,8 @@ ansible-playbook -i ansible/inventory/hosts.ini ansible/collections/ansible_coll
   - Override: `-e nginx_welcome_text="Hello from Frythub"`
 - `setup-certbot.yml` — install certbot + nginx plugin (no cert issuance).
   - Example: `.../setup-certbot.yml`
-- `setup-node-pm2.yml` — install Node.js (default major 20) and PM2.
-  - Example: `.../setup-node-pm2.yml`
+- `setup-node.yml` — install Node.js (default major 20) and pnpm for systemd-managed Node apps.
+  - Example: `.../setup-node.yml`
   - Override Node major: `-e nodejs_major=18`
 - `setup-dotnet.yml` — install ASP.NET Core runtime and dotnet runtime (default 8.0; falls back to jammy feed on noble).
   - Example: `.../setup-dotnet.yml`
@@ -61,12 +61,12 @@ Run with:
 ansible-playbook -i ansible/inventory/hosts.ini ansible/collections/ansible_collections/frythub/apps/playbooks/<playbook>.yml
 ```
 
-- `deploy-web-apps.yml` — build/deploy Next.js apps with PM2 + Nginx templating.
+- `deploy-web-apps.yml` — build/deploy Next.js apps with systemd services + Nginx templating.
   - Ensure `ansible/group_vars/web/apps.yml` is filled out.
 - `deploy-dotnet-api.yml` — checkout/publish .NET API, install systemd unit, Nginx proxy.
   - Override environment: `-e "target_env=test"` or `-e "target_env=prod"` (default test).
   - Creates a blank `.env` if missing at the repo root for that environment.
-- `update-web-apps.yml` — update code, rebuild, and restart PM2 apps (no Nginx changes).
+- `update-web-apps.yml` — update code, rebuild, and restart systemd services (no Nginx changes).
   - Test (default, pulls branch `dev`): `ansible-playbook -i ansible/inventory/hosts.ini ansible/collections/ansible_collections/frythub/apps/playbooks/update-web-apps.yml`
   - Prod (pulls branch `main`): add `-e "target_env=prod"`
 - `update-dotnet-api.yml` — update code, republish, restart systemd service (no Nginx changes).

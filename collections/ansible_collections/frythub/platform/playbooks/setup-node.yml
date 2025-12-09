@@ -1,4 +1,4 @@
-- name: Install Node.js and PM2 on web hosts
+- name: Install Node.js on web hosts (systemd-managed apps)
   hosts: web
   become: true
   gather_facts: true
@@ -55,23 +55,23 @@
         name: nodejs
         state: present
 
-    - name: Install PM2 globally
-      ansible.builtin.command: npm install -g pm2
+    - name: Install pnpm globally (if needed)
+      ansible.builtin.command: npm install -g pnpm
       args:
-        creates: /usr/bin/pm2
+        creates: /usr/local/bin/pnpm
 
     - name: Show Node.js version
       ansible.builtin.command: node -v
       register: node_version
       changed_when: false
 
-    - name: Show PM2 version
-      ansible.builtin.command: pm2 -v
-      register: pm2_version
+    - name: Show pnpm version
+      ansible.builtin.command: pnpm -v
+      register: pnpm_version
       changed_when: false
 
     - name: Display installed versions
       ansible.builtin.debug:
         msg:
           - "Node version: {{ node_version.stdout }}"
-          - "PM2 version: {{ pm2_version.stdout }}"
+          - "pnpm version: {{ pnpm_version.stdout }}"

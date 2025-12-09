@@ -23,6 +23,22 @@
         group: root
         mode: "0644"
 
+    - name: Ensure CI/CD templates directory exists
+      ansible.builtin.file:
+        path: "{{ ci_dir }}/templates"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Copy systemd web app template for CI
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../templates/systemd-web-app.service.j2"
+        dest: "{{ ci_dir }}/templates/systemd-web-app.service.j2"
+        owner: root
+        group: root
+        mode: "0644"
+
     - name: Copy .NET API update playbook for CI
       ansible.builtin.copy:
         src: "{{ playbook_dir }}/update-dotnet-api.yml"

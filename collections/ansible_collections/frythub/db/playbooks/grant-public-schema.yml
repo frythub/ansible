@@ -1,0 +1,35 @@
+- name: Grant public schema privileges for frythub databases
+  hosts: db
+  become: true
+  gather_facts: false
+
+  vars_files:
+    - "{{ inventory_dir }}/../group_vars/all/vault.yml"
+
+  vars:
+    databases:
+      - name: frythub_test
+        app_user: "{{ frythub_test_db_user }}"
+      - name: frythub_prod
+        app_user: "{{ frythub_prod_db_user }}"
+
+  tasks:
+    - name: Ensure psycopg2 client libs are present
+      ansible.builtin.apt:
+        update_cache: yes
+        name: python3-psycopg2
+        state: present
+
+    - name: Grant schema/table/sequence privileges on public
+      ansible.builtin.shell: |
+        sudo -u postgres psql -d "{{ item.name }}" <<'SQL'
+        GRANT USAGE ON SCHEMA public TO {{ item.app_user }};
+        GRANT CREATE ON SCHEMA public TO {{ item.app_user }};
+        GRANT SELECT,INSERT,UPDATE,DELETE ON ALL TABLES IN SCHEMA public TO {{ item.app_user }};
+        GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO {{ item.app_user }};
+        ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT,INSERT,UPDATE,DELETE ON TABLES TO {{ item.app_user }};
+        ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL PRIVILEGES ON SEQUENCES TO {{ item.app_user }};
+        SQL
+      loop: "{{ databases }}"
+      loop_control:
+        label: "{{ item.name }} -> {{ item.app_user }}"

@@ -32,6 +32,9 @@
 
     # Override via: -e "target_env=test" or "target_env=prod"
     target_env: "test"
+    # .NET SDK version and repo mapping (noble uses jammy feed)
+    dotnet_release: "8.0"
+    dotnet_repo_version: "{{ {'24.04': '22.04'}.get(ansible_distribution_version, ansible_distribution_version | default('22.04')) }}"
 
   # ---------------- PRE TASKS ----------------
   pre_tasks:
@@ -57,33 +60,52 @@
   tasks:
 
     # ---------- INSTALL .NET SDK (if not installed) ----------
-    - name: Install required packages for Microsoft package feed
+    - name: Check if Microsoft package repo is installed
+      ansible.builtin.command: dpkg-query -W packages-microsoft-prod
+      register: ms_repo_query
+      changed_when: false
+      failed_when: false
+
+    - name: Set ms repo installed flag
+      ansible.builtin.set_fact:
+        ms_repo_installed: "{{ ms_repo_query.rc == 0 }}"
+
+    - name: Install prerequisite packages
       ansible.builtin.apt:
-        name:
-          - wget
-          - apt-transport-https
-          - software-properties-common
         update_cache: yes
+        name:
+          - ca-certificates
+          - apt-transport-https
+          - curl
+        state: present
 
-    - name: Download Microsoft package feed
-      ansible.builtin.command: >
-        wget https://packages.microsoft.com/config/ubuntu/{{ ansible_distribution_version }}/packages-microsoft-prod.deb
-        -O /tmp/packages-microsoft-prod.deb
-      args:
-        creates: /tmp/packages-microsoft-prod.deb
+    - name: Download Microsoft package repo config (.deb)
+      ansible.builtin.get_url:
+        url: "https://packages.microsoft.com/config/ubuntu/{{ dotnet_repo_version }}/packages-microsoft-prod.deb"
+        dest: /tmp/packages-microsoft-prod.deb
+        mode: "0644"
+      when: not ms_repo_installed
 
-    - name: Install Microsoft package feed
+    - name: Install Microsoft package repo config
       ansible.builtin.apt:
         deb: /tmp/packages-microsoft-prod.deb
+        state: present
+      when: not ms_repo_installed
 
     - name: Update apt cache
       ansible.builtin.apt:
         update_cache: yes
+        cache_valid_time: 3600
 
-    - name: Install .NET SDK 8
+    - name: Install .NET SDK {{ dotnet_release }}
       ansible.builtin.apt:
-        name: dotnet-sdk-8.0
+        name: "dotnet-sdk-{{ dotnet_release }}"
         state: present
+
+    - name: Show dotnet info
+      ansible.builtin.command: dotnet --info
+      register: dotnet_info
+      changed_when: false
 
     # ---------- REPO FOR THIS ENV ----------
     - name: Ensure repo_root exists

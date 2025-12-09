@@ -1,13 +1,12 @@
 ansible-vault decrypt group_vars/all/vault.yml
 ansible-vault encrypt group_vars/all/vault.yml
 
-ezhZmen0
 
 ansible-playbook -i inventory/hosts.ini collections/ansible_collections/frythub/platform/playbooks/test-orchestration.yml
 ansible-playbook -i inventory/hosts.ini collections/ansible_collections/frythub/platform/playbooks/bootstrap-user.yml
 ansible-playbook -i inventory/hosts.ini collections/ansible_collections/frythub/platform/playbooks/setup-nginx.yml
 ansible-playbook -i inventory/hosts.ini collections/ansible_collections/frythub/platform/playbooks/setup-certbot.yml
-ansible-playbook -i inventory/hosts.ini collections/ansible_collections/frythub/platform/playbooks/setup-node-pm2.yml
+ansible-playbook -i inventory/hosts.ini collections/ansible_collections/frythub/platform/playbooks/setup-node.yml
 ansible-playbook -i inventory/hosts.ini collections/ansible_collections/frythub/platform/playbooks/setup-dotnet.yml
 ansible-playbook -i inventory/hosts.ini collections/ansible_collections/frythub/platform/playbooks/setup-postgres.yml
 ansible-playbook -i inventory/hosts.ini collections/ansible_collections/frythub/platform/playbooks/enable-postgres-remote.yml
