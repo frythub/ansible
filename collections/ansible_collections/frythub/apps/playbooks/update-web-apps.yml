@@ -80,7 +80,7 @@
         depth: 1
         single_branch: yes
         update: yes
-        force: no
+        force: yes
 
     - name: Install pnpm globally (if needed)
       ansible.builtin.command: npm install -g pnpm
